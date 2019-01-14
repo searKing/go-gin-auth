@@ -2,6 +2,7 @@
 go-gin-auth is an authorization middleware for Gin
 [![GitHub tag](https://img.shields.io/github/tag/searKing/go-gin-jwt.svg)](https://github.com/searKing/go-gin-jwt/releases)
 [![GoDoc](https://godoc.org/github.com/searKing/go-gin-jwt?status.svg)](https://godoc.org/github.com/searKing/go-gin-jwt)
+[![GitHub license](https://img.shields.io/github/license/searKing/go-gin-auth.svg)](https://github.com/searKing/go-gin-jwt/releases)
 
 This is a middleware for [Gin](https://github.com/gin-gonic/gin) framework.
 
