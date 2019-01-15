@@ -11,8 +11,8 @@ import (
 )
 
 // GinJWTMiddleware provides a Json-Web-Token authentication implementation. On failure, a 401 HTTP response
-// is returned. On success, the wrapped middleware is called, and the userID is made available as
-// c.Get("userID").(string).
+// is returned. On success, the wrapped middleware is called, and the clientID is made available as
+// c.Get("clientID").(string).
 // Users can get a token by posting a json request to LoginHandler. The token then needs to be passed in
 // the Authentication header. Example: Authorization:Bearer XXX_TOKEN_XXX
 type GinJWTMiddleware struct {
@@ -34,11 +34,11 @@ type GinJWTMiddleware struct {
 	// Optional, defaults to 0 meaning not refreshable.
 	RefreshExpireIn time.Duration `options:"optional"`
 
-	// Callback function that should perform the authentication of the user based on userID and
+	// Callback function that should perform the authentication of the user based on clientID and
 	// password. Must return true on success, false on failure. Required.
 	// Option return user id, if so, user id will be stored in Claim Array.
 	// 认证
-	AuthenticatorFunc func(c *gin.Context) (appId string, pass bool) `options:"optional"`
+	AuthenticatorFunc func(c *gin.Context) (clientId string, pass bool) `options:"optional"`
 
 	// Callback function that will be called during login.
 	// Using this function it is possible to add additional payload data to the webtoken.
@@ -46,7 +46,7 @@ type GinJWTMiddleware struct {
 	// Note that the payload is not encrypted.
 	// The attributes mentioned on jwt.io can't be used as keys for the map.
 	// Optional, by default no additional data will be set.
-	PayloadFunc func(c *gin.Context, appId string) map[string]interface{} `options:"optional"`
+	PayloadFunc func(c *gin.Context, clientId string) map[string]interface{} `options:"optional"`
 
 	// Callback function that should perform the authorization of the authenticated user. Called
 	// only after an authentication success. Must return true on success, false on failure.
@@ -95,7 +95,7 @@ func NewGinJWTMiddlewareFromFile(alg string, keyFiles ...string) *GinJWTMiddlewa
 }
 
 func (mw *GinJWTMiddleware) BindFuncs() {
-	mw.jwtAuth.AuthenticatorFunc = func(ctx context.Context, r *http.Request) (appId string, pass bool) {
+	mw.jwtAuth.AuthenticatorFunc = func(ctx context.Context, r *http.Request) (clientId string, pass bool) {
 		c := ctx.Value(KeyGinContext)
 		if c == nil {
 			return "", false
@@ -120,7 +120,7 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 
 	}
 
-	mw.jwtAuth.PayloadFunc = func(ctx context.Context, appId string) map[string]interface{} {
+	mw.jwtAuth.PayloadFunc = func(ctx context.Context, clientId string) map[string]interface{} {
 		c := ctx.Value(KeyGinContext)
 		if c == nil {
 			return nil
@@ -129,7 +129,7 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 		if !ok {
 			return nil
 		}
-		return mw.Payload(ginC, appId)
+		return mw.Payload(ginC, clientId)
 	}
 
 	mw.jwtAuth.UnauthorizedFunc = func(ctx context.Context, w http.ResponseWriter, status int) {
@@ -187,10 +187,10 @@ func (mw *GinJWTMiddleware) RefreshHandler(ctx context.Context) gin.HandlerFunc 
 	}
 }
 
-// Callback function that should perform the authentication of the user based on userID and
+// Callback function that should perform the authentication of the user based on clientID and
 // password. Must return true on success, false on failure. Required.
 // Option return user id, if so, user id will be stored in Claim Array.
-func (mw *GinJWTMiddleware) Authenticator(c *gin.Context) (appId string, pass bool) {
+func (mw *GinJWTMiddleware) Authenticator(c *gin.Context) (clientId string, pass bool) {
 	if mw.AuthenticatorFunc != nil {
 		return mw.AuthenticatorFunc(c)
 	}
@@ -213,9 +213,9 @@ func (mw *GinJWTMiddleware) Authorizator(c *gin.Context, claims jwt.MapClaims) (
 // Note that the payload is not encrypted.
 // The attributes mentioned on jwt.io can't be used as keys for the map.
 // Optional, by default no additional data will be set.
-func (mw *GinJWTMiddleware) Payload(c *gin.Context, appId string) map[string]interface{} {
+func (mw *GinJWTMiddleware) Payload(c *gin.Context, clientId string) map[string]interface{} {
 	if mw.PayloadFunc != nil {
-		return mw.PayloadFunc(c, appId)
+		return mw.PayloadFunc(c, clientId)
 	}
 	return nil
 }
