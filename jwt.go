@@ -37,12 +37,8 @@ type GinJWTMiddleware struct {
 	// Callback function that should perform the authentication of the user based on userID and
 	// password. Must return true on success, false on failure. Required.
 	// Option return user id, if so, user id will be stored in Claim Array.
+	// 认证
 	AuthenticatorFunc func(c *gin.Context) (appId string, pass bool) `options:"optional"`
-
-	// Callback function that should perform the authorization of the authenticated user. Called
-	// only after an authentication success. Must return true on success, false on failure.
-	// Optional, default to success.
-	AuthorizatorFunc func(c *gin.Context, appId string) bool `options:"optional"`
 
 	// Callback function that will be called during login.
 	// Using this function it is possible to add additional payload data to the webtoken.
@@ -52,11 +48,14 @@ type GinJWTMiddleware struct {
 	// Optional, by default no additional data will be set.
 	PayloadFunc func(c *gin.Context, appId string) map[string]interface{} `options:"optional"`
 
+	// Callback function that should perform the authorization of the authenticated user. Called
+	// only after an authentication success. Must return true on success, false on failure.
+	// Optional, default to success.
+	// 授权
+	AuthorizatorFunc func(c *gin.Context, claims jwt.MapClaims) bool `options:"optional"`
+
 	// User can define own UnauthorizedFunc func.
 	UnauthorizedFunc func(c *gin.Context, statusCode int) `options:"optional"`
-
-	// Set the identity handler function
-	IdentityFunc func(c *gin.Context, claims jwt.Claims) string `options:"optional"`
 
 	// TimeNowFunc provides the current time. You can override it to use another time value.
 	// This is useful for testing or if your server uses a different time zone than your tokens.
@@ -108,7 +107,7 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 		return mw.Authenticator(ginC)
 	}
 
-	mw.jwtAuth.AuthorizatorFunc = func(ctx context.Context, userID string, w http.ResponseWriter) (pass bool) {
+	mw.jwtAuth.AuthorizatorFunc = func(ctx context.Context, claims jwt.MapClaims, w http.ResponseWriter) (pass bool) {
 		c := ctx.Value(KeyGinContext)
 		if c == nil {
 			return false
@@ -117,7 +116,8 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 		if !ok {
 			return false
 		}
-		return mw.Authorizator(ginC, userID)
+		return mw.Authorizator(ginC, claims)
+
 	}
 
 	mw.jwtAuth.PayloadFunc = func(ctx context.Context, appId string) map[string]interface{} {
@@ -144,18 +144,6 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 		mw.Unauthorized(ginC, status)
 	}
 
-	mw.jwtAuth.IdentityFunc = func(ctx context.Context, claims jwt.Claims) (appId string) {
-		c := ctx.Value(KeyGinContext)
-		if c == nil {
-			return ""
-		}
-		ginC, ok := c.(*gin.Context)
-		if !ok {
-			return ""
-		}
-		return mw.Identity(ginC, claims)
-	}
-
 	mw.jwtAuth.TimeNowFunc = func(ctx context.Context) time.Time {
 		c := ctx.Value(KeyGinContext)
 		if c == nil {
@@ -169,21 +157,23 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 	}
 }
 
-// AuthenticateHandler makes JWTAuth implement the Middleware interface.
-func (mw *GinJWTMiddleware) AuthenticateHandler(ctx context.Context) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ctx := context.WithValue(ctx, KeyGinContext, c)
-		mw.jwtAuth.AuthenticateHandler(ctx).ServeHTTP(c.Writer, c.Request)
-	}
-}
-
 // LoginHandler can be used by clients to get a jwt token.
 // Payload needs to be json in the form of {"username": "USERNAME", "password": "PASSWORD"}.
 // Reply will be of the form {"access_token": "ACCESS_TOKEN", "refresh_token": "REFRESH_TOKEN", "expires_in": "EXPIRES_IN"}.
+// 认证
 func (mw *GinJWTMiddleware) LoginHandler(ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := context.WithValue(ctx, KeyGinContext, c)
 		mw.jwtAuth.LoginHandler(ctx).ServeHTTP(c.Writer, c.Request)
+	}
+}
+
+// AuthorizateHandler makes JWTAuth implement the Middleware interface.
+// 授权
+func (mw *GinJWTMiddleware) AuthorizateHandler(ctx context.Context) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := context.WithValue(ctx, KeyGinContext, c)
+		mw.jwtAuth.AuthenticateHandler(ctx).ServeHTTP(c.Writer, c.Request)
 	}
 }
 
@@ -210,9 +200,9 @@ func (mw *GinJWTMiddleware) Authenticator(c *gin.Context) (appId string, pass bo
 // Callback function that should perform the authorization of the authenticated user. Called
 // only after an authentication success. Must return true on success, false on failure.
 // Optional, default to success.
-func (mw *GinJWTMiddleware) Authorizator(c *gin.Context, appId string) (pass bool) {
+func (mw *GinJWTMiddleware) Authorizator(c *gin.Context, claims jwt.MapClaims) (pass bool) {
 	if mw.AuthorizatorFunc != nil {
-		return mw.AuthorizatorFunc(c, appId)
+		return mw.AuthorizatorFunc(c, claims)
 	}
 	return true
 }
@@ -242,14 +232,6 @@ func (mw *GinJWTMiddleware) Unauthorized(c *gin.Context, statusCode int) {
 	auth.WriteHTTPWithStatusCode(c.Writer, statusCode)
 
 	return
-}
-
-// Set the identity handler function
-func (mw *GinJWTMiddleware) Identity(c *gin.Context, claims jwt.Claims) (appId string) {
-	if mw.IdentityFunc != nil {
-		return mw.IdentityFunc(c, claims)
-	}
-	return ""
 }
 
 // TimeNowFunc provides the current time. You can override it to use another time value.
