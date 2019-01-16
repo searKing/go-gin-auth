@@ -6,6 +6,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/searKing/go-gin-auth"
+	"github.com/searKing/golib/net/http_/auth/jwt_"
 	"net/http"
 	"os"
 )
@@ -27,8 +28,10 @@ func main() {
 	}
 
 	// the jwt middleware
-	authMiddleware := go_gin_auth.NewHS256GinJWTMiddleware([]byte("my signing key"))
-
+	authMiddleware, err := go_gin_auth.NewGinJWTMiddlewareFromRandom(jwt_.SigningMethodRS256)
+	if err != nil {
+		panic(err)
+	}
 	// authMiddleware.AccessExpireIn = time.Hour //default value
 	// authMiddleware.RefreshExpireIn = 7 * 24 * time.Hour  //default value
 	// 认证

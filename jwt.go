@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
-	"github.com/searKing/golib/crypto/auth"
 	"github.com/searKing/golib/net/http_/auth/jwt_"
 	"net/http"
 	"time"
@@ -68,30 +67,40 @@ const (
 	KeyGinContext = "GinContext"
 )
 
-func NewHS256GinJWTMiddleware(key ...[]byte) *GinJWTMiddleware {
-	var signedKey []byte
-	if len(key) == 0 {
-		signedKey = []byte(auth.ClientKeyWithSize(256))
-	} else {
-		signedKey = key[0]
+func NewGinJWTMiddlewareFromRandom(alg string) (*GinJWTMiddleware, error) {
+	jwtAuth, err := jwt_.NewJWTAuthFromRandom(alg)
+	if err != nil {
+		return nil, err
 	}
-	return NewGinJWTMiddleware(jwt_.SigningMethodHS256, signedKey)
-}
-
-func NewGinJWTMiddleware(alg string, keys ...[]byte) *GinJWTMiddleware {
 	jwtMid := &GinJWTMiddleware{
-		jwtAuth: jwt_.NewJWTAuth(alg, keys...),
+		jwtAuth: jwtAuth,
 	}
 	jwtMid.BindFuncs()
-	return jwtMid
+	return jwtMid, nil
 }
 
-func NewGinJWTMiddlewareFromFile(alg string, keyFiles ...string) *GinJWTMiddleware {
+func NewGinJWTMiddleware(alg string, privateKey []byte, publicKey []byte, password ...string) (*GinJWTMiddleware, error) {
+	jwtAuth, err := jwt_.NewJWTAuth(alg, privateKey, publicKey, password...)
+	if err != nil {
+		return nil, err
+	}
 	jwtMid := &GinJWTMiddleware{
-		jwtAuth: jwt_.NewJWTAuthFromFile(alg, keyFiles...),
+		jwtAuth: jwtAuth,
 	}
 	jwtMid.BindFuncs()
-	return jwtMid
+	return jwtMid, nil
+}
+
+func NewGinJWTMiddlewareFromFile(alg string, privateKeyFile string, publicKeyFile string, password ...string) (*GinJWTMiddleware, error) {
+	jwtAuth, err := jwt_.NewJWTAuthFromFile(alg, privateKeyFile, publicKeyFile, password...)
+	if err != nil {
+		return nil, err
+	}
+	jwtMid := &GinJWTMiddleware{
+		jwtAuth: jwtAuth,
+	}
+	jwtMid.BindFuncs()
+	return jwtMid, nil
 }
 
 func (mw *GinJWTMiddleware) BindFuncs() {
