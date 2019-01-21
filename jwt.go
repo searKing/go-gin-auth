@@ -37,7 +37,7 @@ type GinJWTMiddleware struct {
 	// password. Must return true on success, false on failure. Required.
 	// Option return user id, if so, user id will be stored in Claim Array.
 	// 认证
-	AuthenticatorFunc func(c *gin.Context) (clientId string, pass bool) `options:"optional"`
+	AuthenticatorFunc func(c *gin.Context, password *jwt_.ClientPassword) (pass bool) `options:"optional"`
 
 	// Callback function that will be called during login.
 	// Using this function it is possible to add additional payload data to the webtoken.
@@ -104,16 +104,16 @@ func NewGinJWTMiddlewareFromFile(alg string, privateKeyFile string, publicKeyFil
 }
 
 func (mw *GinJWTMiddleware) BindFuncs() {
-	mw.jwtAuth.AuthenticatorFunc = func(ctx context.Context, r *http.Request) (clientId string, pass bool) {
+	mw.jwtAuth.AuthenticatorFunc = func(ctx context.Context, password *jwt_.ClientPassword) (pass bool) {
 		c := ctx.Value(KeyGinContext)
 		if c == nil {
-			return "", false
+			return false
 		}
 		ginC, ok := c.(*gin.Context)
 		if !ok {
-			return "", false
+			return false
 		}
-		return mw.Authenticator(ginC)
+		return mw.Authenticator(ginC, password)
 	}
 
 	mw.jwtAuth.AuthorizatorFunc = func(ctx context.Context, claims jwt.MapClaims, w http.ResponseWriter) (pass bool) {
@@ -129,7 +129,7 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 
 	}
 
-	mw.jwtAuth.PayloadFunc = func(ctx context.Context, clientId string) map[string]interface{} {
+	mw.jwtAuth.JWTExtraFunc = func(ctx context.Context, clientId string) map[string]interface{} {
 		c := ctx.Value(KeyGinContext)
 		if c == nil {
 			return nil
@@ -199,11 +199,11 @@ func (mw *GinJWTMiddleware) RefreshHandler(ctx context.Context) gin.HandlerFunc 
 // Callback function that should perform the authentication of the user based on clientID and
 // password. Must return true on success, false on failure. Required.
 // Option return user id, if so, user id will be stored in Claim Array.
-func (mw *GinJWTMiddleware) Authenticator(c *gin.Context) (clientId string, pass bool) {
+func (mw *GinJWTMiddleware) Authenticator(c *gin.Context, password *jwt_.ClientPassword) (pass bool) {
 	if mw.AuthenticatorFunc != nil {
-		return mw.AuthenticatorFunc(c)
+		return mw.AuthenticatorFunc(c, password)
 	}
-	return "", true
+	return true
 }
 
 // Callback function that should perform the authorization of the authenticated user. Called
