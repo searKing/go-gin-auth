@@ -12,7 +12,7 @@ import (
 // GinJWTMiddleware provides a Json-Web-Token authentication implementation. On failure, a 401 HTTP response
 // is returned. On success, the wrapped middleware is called, and the clientID is made available as
 // c.Get("clientID").(string).
-// Users can get a token by posting a json request to LoginHandler. The token then needs to be passed in
+// Users can get a token by posting a json request to AuthorizationEndointHandler. The token then needs to be passed in
 // the Authentication header. Example: Authorization:Bearer XXX_TOKEN_XXX
 type GinJWTMiddleware struct {
 	// Realm name to display to the user. Required.
@@ -166,14 +166,14 @@ func (mw *GinJWTMiddleware) BindFuncs() {
 	}
 }
 
-// LoginHandler can be used by clients to get a jwt token.
+// AuthorizationEndointHandler can be used by clients to get a jwt token.
 // Payload needs to be json in the form of {"username": "USERNAME", "password": "PASSWORD"}.
 // Reply will be of the form {"access_token": "ACCESS_TOKEN", "refresh_token": "REFRESH_TOKEN", "expires_in": "EXPIRES_IN"}.
 // 认证
 func (mw *GinJWTMiddleware) LoginHandler(ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := context.WithValue(ctx, KeyGinContext, c)
-		mw.jwtAuth.LoginHandler(ctx).ServeHTTP(c.Writer, c.Request)
+		mw.jwtAuth.AuthorizationEndointHandler(ctx).ServeHTTP(c.Writer, c.Request)
 	}
 }
 
