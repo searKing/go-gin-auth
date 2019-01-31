@@ -5,7 +5,10 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/searKing/golib/net/http_/auth/jwt_"
-	"net/http"
+	"github.com/searKing/golib/net/http_/oauth2/endpoints"
+	"github.com/searKing/golib/net/http_/oauth2/grant/accesstoken"
+	"github.com/searKing/golib/net/http_/oauth2/grant/authorize"
+	"github.com/searKing/golib/net/http_/oauth2/grant/implict"
 	"time"
 )
 
@@ -15,15 +18,6 @@ import (
 // Users can get a token by posting a json request to AuthorizationEndointHandler. The token then needs to be passed in
 // the Authentication header. Example: Authorization:Bearer XXX_TOKEN_XXX
 type GinJWTMiddleware struct {
-	// Realm name to display to the user. Required.
-	// https://tools.ietf.org/html/rfc7235#section-2.2
-	Realm string `options:"optional" default:""`
-
-	// Whenever the user wants to access a protected route or resource,
-	// the user agent should send the JWT,
-	// https://jwt.io/introduction/
-	Schema string `options:"optional" default:"Bearer"`
-
 	// Duration that a jwt access-token is valid. Optional, defaults to one hour.
 	AccessExpireIn time.Duration `options:"optional"`
 	// Duration that a jwt refresh-token is valid. Optional, defaults to seven days.
@@ -33,221 +27,186 @@ type GinJWTMiddleware struct {
 	// Optional, defaults to 0 meaning not refreshable.
 	RefreshExpireIn time.Duration `options:"optional"`
 
-	// Callback function that should perform the authentication of the user based on clientID and
-	// password. Must return true on success, false on failure. Required.
-	// Option return user id, if so, user id will be stored in Claim Array.
-	// 认证
-	AuthenticatorFunc func(c *gin.Context, password *jwt_.ClientPassword) (pass bool) `options:"optional"`
+	AuthorizationCodeGrantAuthorizationFunc func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.AuthorizeAuthorizationResult, err authorize.ErrorText)
+	ImplicitGrantAuthorizationFunc          func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.JWTImplicitGrantAuthorizationResult, err implict.ErrorText)
 
-	// Callback function that will be called during login.
-	// Using this function it is possible to add additional payload data to the webtoken.
-	// The data is then made available during requests via c.Get("JWT_PAYLOAD").
-	// Note that the payload is not encrypted.
-	// The attributes mentioned on jwt.io can't be used as keys for the map.
-	// Optional, by default no additional data will be set.
-	PayloadFunc func(c *gin.Context, clientId string) map[string]interface{} `options:"optional"`
+	AuthorizationCodeGrantAccessTokenFunc                func(ctx context.Context, tokenReq *endpoints.AuthorizeAccessTokenRequest) (tokenResp *endpoints.JWTAuthorizeAccessTokenResponse, err accesstoken.ErrorText)
+	ResourceOwnerPasswordCredentialsGrantAccessTokenFunc func(ctx context.Context, tokenReq *endpoints.ResourceAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText)
+	ClientCredentialsGrantAccessTokenFunc                func(ctx context.Context, tokenReq *endpoints.ClientAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText)
+	RefreshTokenGrantAccessTokenFunc                     func(ctx context.Context, tokenReq *endpoints.JWTRefreshTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText)
 
-	// Callback function that should perform the authorization of the authenticated user. Called
-	// only after an authentication success. Must return true on success, false on failure.
-	// Optional, default to success.
-	// 授权
-	AuthorizatorFunc func(c *gin.Context, claims jwt.MapClaims) bool `options:"optional"`
-
-	// User can define own UnauthorizedFunc func.
-	UnauthorizedFunc func(c *gin.Context, statusCode int) `options:"optional"`
-
+	AuthorizateFunc func(ctx context.Context, claims jwt.MapClaims) (err accesstoken.ErrorText)
 	// TimeNowFunc provides the current time. You can override it to use another time value.
 	// This is useful for testing or if your server uses a different time zone than your tokens.
-	TimeNowFunc func(c *gin.Context) time.Time `options:"optional"`
+	TimeNowFunc func(ctx context.Context) time.Time
 
-	jwtAuth *jwt_.JWTAuth
+	auth       *endpoints.JWTAuthorizationEndpoint
+	authBinded bool
 }
 
 const (
 	KeyGinContext = "GinContext"
 )
 
-func NewGinJWTMiddlewareFromRandom(alg string) (*GinJWTMiddleware, error) {
-	jwtAuth, err := jwt_.NewJWTAuthFromRandom(alg)
-	if err != nil {
-		return nil, err
+var DefaultGinJWTMiddleware = func() GinJWTMiddleware {
+	auth := func() *endpoints.JWTAuthorizationEndpoint {
+		clone := endpoints.DefaultJWTAuthorizationEndpoint
+		return &clone
+	}()
+	return GinJWTMiddleware{
+		AccessExpireIn:  auth.AccessExpireIn,
+		RefreshExpireIn: auth.RefreshExpireIn,
+		auth:            auth,
 	}
-	jwtMid := &GinJWTMiddleware{
-		jwtAuth: jwtAuth,
-	}
-	jwtMid.BindFuncs()
-	return jwtMid, nil
-}
+}()
 
-func NewGinJWTMiddleware(alg string, privateKey []byte, publicKey []byte, password ...string) (*GinJWTMiddleware, error) {
-	jwtAuth, err := jwt_.NewJWTAuth(alg, privateKey, publicKey, password...)
-	if err != nil {
-		return nil, err
-	}
-	jwtMid := &GinJWTMiddleware{
-		jwtAuth: jwtAuth,
-	}
-	jwtMid.BindFuncs()
-	return jwtMid, nil
-}
-
-func NewGinJWTMiddlewareFromFile(alg string, privateKeyFile string, publicKeyFile string, password ...string) (*GinJWTMiddleware, error) {
-	jwtAuth, err := jwt_.NewJWTAuthFromFile(alg, privateKeyFile, publicKeyFile, password...)
-	if err != nil {
-		return nil, err
-	}
-	jwtMid := &GinJWTMiddleware{
-		jwtAuth: jwtAuth,
-	}
-	jwtMid.BindFuncs()
-	return jwtMid, nil
-}
-
-func (mw *GinJWTMiddleware) BindFuncs() {
-	mw.jwtAuth.AuthenticatorFunc = func(ctx context.Context, password *jwt_.ClientPassword) (pass bool) {
-		c := ctx.Value(KeyGinContext)
-		if c == nil {
-			return false
-		}
-		ginC, ok := c.(*gin.Context)
-		if !ok {
-			return false
-		}
-		return mw.Authenticator(ginC, password)
-	}
-
-	mw.jwtAuth.AuthorizatorFunc = func(ctx context.Context, claims jwt.MapClaims, w http.ResponseWriter) (pass bool) {
-		c := ctx.Value(KeyGinContext)
-		if c == nil {
-			return false
-		}
-		ginC, ok := c.(*gin.Context)
-		if !ok {
-			return false
-		}
-		return mw.Authorizator(ginC, claims)
-
-	}
-
-	mw.jwtAuth.JWTExtraFunc = func(ctx context.Context, clientId string) map[string]interface{} {
-		c := ctx.Value(KeyGinContext)
-		if c == nil {
-			return nil
-		}
-		ginC, ok := c.(*gin.Context)
-		if !ok {
-			return nil
-		}
-		return mw.Payload(ginC, clientId)
-	}
-
-	mw.jwtAuth.UnauthorizedFunc = func(ctx context.Context, w http.ResponseWriter, status int) {
-		c := ctx.Value(KeyGinContext)
-		if c == nil {
-			return
-		}
-		ginC, ok := c.(*gin.Context)
-		if !ok {
-			return
-		}
-		mw.Unauthorized(ginC, status)
-	}
-
-	mw.jwtAuth.TimeNowFunc = func(ctx context.Context) time.Time {
-		c := ctx.Value(KeyGinContext)
-		if c == nil {
-			return time.Now()
-		}
-		ginC, ok := c.(*gin.Context)
-		if !ok {
-			return time.Now()
-		}
-		return mw.TimeNow(ginC)
+func NewGinJWTMiddleware(key *jwt_.AuthKey) *GinJWTMiddleware {
+	return &GinJWTMiddleware{
+		auth: endpoints.NewJWTAuthorizationEndpoint(key),
 	}
 }
 
-// AuthorizationEndointHandler can be used by clients to get a jwt token.
-// Payload needs to be json in the form of {"username": "USERNAME", "password": "PASSWORD"}.
-// Reply will be of the form {"access_token": "ACCESS_TOKEN", "refresh_token": "REFRESH_TOKEN", "expires_in": "EXPIRES_IN"}.
-// 认证
-func (mw *GinJWTMiddleware) LoginHandler(ctx context.Context) gin.HandlerFunc {
+func (e *GinJWTMiddleware) AuthorizationHandler(ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		e.lazyInit()
 		ctx := context.WithValue(ctx, KeyGinContext, c)
-		mw.jwtAuth.AuthorizationEndointHandler(ctx).ServeHTTP(c.Writer, c.Request)
+		e.auth.AuthorizationHandler(ctx).ServeHTTP(c.Writer, c.Request)
 	}
 }
-
-// AuthorizateHandler makes JWTAuth implement the Middleware interface.
-// 授权
-func (mw *GinJWTMiddleware) AuthorizateHandler(ctx context.Context) gin.HandlerFunc {
+func (e *GinJWTMiddleware) AccessTokenHandler(ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		e.lazyInit()
 		ctx := context.WithValue(ctx, KeyGinContext, c)
-		mw.jwtAuth.AuthenticateHandler(ctx).ServeHTTP(c.Writer, c.Request)
+		e.auth.AccessTokenHandler(ctx).ServeHTTP(c.Writer, c.Request)
 	}
 }
-
-// RefreshHandler can be used to refresh a token. The token still needs to be valid on refresh.
-// Shall be put under an endpoint that is using the JWTAuth.
-// Reply will be of the form {"access_token": "ACCESS_TOKEN", "expires_in": "EXPIRES_IN"}.
-func (mw *GinJWTMiddleware) RefreshHandler(ctx context.Context) gin.HandlerFunc {
+func (e *GinJWTMiddleware) AuthorizateHandler(ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		e.lazyInit()
 		ctx := context.WithValue(ctx, KeyGinContext, c)
-		mw.jwtAuth.RefreshHandler(ctx).ServeHTTP(c.Writer, c.Request)
+		e.auth.AuthorizateHandler(ctx).ServeHTTP(c.Writer, c.Request)
 	}
 }
 
-// Callback function that should perform the authentication of the user based on clientID and
-// password. Must return true on success, false on failure. Required.
-// Option return user id, if so, user id will be stored in Claim Array.
-func (mw *GinJWTMiddleware) Authenticator(c *gin.Context, password *jwt_.ClientPassword) (pass bool) {
-	if mw.AuthenticatorFunc != nil {
-		return mw.AuthenticatorFunc(c, password)
+func (e *GinJWTMiddleware) lazyInit() {
+	if e.auth == nil {
+		return
 	}
-	return true
-}
-
-// Callback function that should perform the authorization of the authenticated user. Called
-// only after an authentication success. Must return true on success, false on failure.
-// Optional, default to success.
-func (mw *GinJWTMiddleware) Authorizator(c *gin.Context, claims jwt.MapClaims) (pass bool) {
-	if mw.AuthorizatorFunc != nil {
-		return mw.AuthorizatorFunc(c, claims)
-	}
-	return true
-}
-
-// Callback function that will be called during login.
-// Using this function it is possible to add additional payload data to the webtoken.
-// The data is then made available during requests via c.Get("JWT_PAYLOAD").
-// Note that the payload is not encrypted.
-// The attributes mentioned on jwt.io can't be used as keys for the map.
-// Optional, by default no additional data will be set.
-func (mw *GinJWTMiddleware) Payload(c *gin.Context, clientId string) map[string]interface{} {
-	if mw.PayloadFunc != nil {
-		return mw.PayloadFunc(c, clientId)
-	}
-	return nil
-}
-
-// show 401 UnauthorizedFunc error.
-func (mw *GinJWTMiddleware) Unauthorized(c *gin.Context, statusCode int) {
-	defer c.Abort()
-	if mw.UnauthorizedFunc != nil {
-		mw.UnauthorizedFunc(c, statusCode)
+	if e.authBinded {
 		return
 	}
 
-	auth := jwt_.NewJWTAuthenticate(mw.Realm, mw.Schema)
-	auth.WriteHTTPWithStatusCode(c.Writer, statusCode)
-
-	return
-}
-
-// TimeNowFunc provides the current time. You can override it to use another time value.
-// This is useful for testing or if your server uses a different time zone than your tokens.
-func (mw *GinJWTMiddleware) TimeNow(c *gin.Context) time.Time {
-	if mw.TimeNowFunc != nil {
-		return mw.TimeNowFunc(c)
+	if e.AuthorizationCodeGrantAuthorizationFunc != nil {
+		e.auth.AuthorizationCodeGrantAuthorizationFunc =
+			func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.AuthorizeAuthorizationResult, err authorize.ErrorText) {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return nil, authorize.ErrorTextInvalidRequest
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return nil, authorize.ErrorTextInvalidRequest
+				}
+				return e.AuthorizationCodeGrantAuthorizationFunc(ginC, authReq)
+			}
 	}
-	return time.Now()
+
+	if e.ImplicitGrantAuthorizationFunc != nil {
+		e.auth.ImplicitGrantAuthorizationFunc = func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.JWTImplicitGrantAuthorizationResult, err implict.ErrorText) {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return nil, implict.ErrorTextInvalidRequest
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return nil, implict.ErrorTextInvalidRequest
+			}
+			return e.ImplicitGrantAuthorizationFunc(ginC, authReq)
+		}
+	}
+
+	if e.AuthorizationCodeGrantAccessTokenFunc != nil {
+		e.auth.AuthorizationCodeGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.AuthorizeAccessTokenRequest) (tokenResp *endpoints.JWTAuthorizeAccessTokenResponse, err accesstoken.ErrorText) {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			return e.AuthorizationCodeGrantAccessTokenFunc(ginC, tokenReq)
+		}
+	}
+
+	if e.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc != nil {
+		e.auth.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ResourceAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			return e.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc(ginC, tokenReq)
+		}
+	}
+
+	if e.ClientCredentialsGrantAccessTokenFunc != nil {
+		e.auth.ClientCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ClientAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			return e.ClientCredentialsGrantAccessTokenFunc(ginC, tokenReq)
+		}
+	}
+
+	if e.RefreshTokenGrantAccessTokenFunc != nil {
+		e.auth.RefreshTokenGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.JWTRefreshTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return nil, accesstoken.ErrorTextInvalidRequest
+			}
+			return e.RefreshTokenGrantAccessTokenFunc(ginC, tokenReq)
+		}
+	}
+
+	if e.AuthorizateFunc != nil {
+		e.auth.AuthorizateFunc = func(ctx context.Context, claims jwt.MapClaims) (err accesstoken.ErrorText) {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return accesstoken.ErrorTextInvalidRequest
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return accesstoken.ErrorTextInvalidRequest
+			}
+			return e.AuthorizateFunc(ginC, claims)
+		}
+	}
+
+	if e.TimeNowFunc != nil {
+		e.auth.TimeNowFunc = func(ctx context.Context) time.Time {
+			c := ctx.Value(KeyGinContext)
+			if c == nil {
+				return time.Now()
+			}
+			ginC, ok := c.(*gin.Context)
+			if !ok {
+				return time.Now()
+			}
+			return e.TimeNowFunc(ginC)
+		}
+	}
+
 }

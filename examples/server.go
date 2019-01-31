@@ -5,7 +5,8 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"github.com/searKing/go-gin-auth"
-	"github.com/searKing/golib/net/http_/auth/jwt_"
+	"github.com/searKing/golib/net/http_/oauth2/endpoints"
+	"github.com/searKing/golib/net/http_/oauth2/grant/accesstoken"
 	"net/http"
 	"os"
 )
@@ -27,42 +28,30 @@ func main() {
 	}
 
 	// the jwt middleware
-	authMiddleware, err := go_gin_auth.NewGinJWTMiddlewareFromRandom(jwt_.SigningMethodRS256)
-	if err != nil {
-		panic(err)
-	}
-	// authMiddleware.AccessExpireIn = time.Hour //default value
-	// authMiddleware.RefreshExpireIn = 7 * 24 * time.Hour  //default value
+	authMiddleware := &go_gin_auth.DefaultGinJWTMiddleware
 	// 认证
-	authMiddleware.AuthenticatorFunc = func(c *gin.Context, password *jwt_.ClientPassword) (pass bool) {
-		if password == nil {
-			return false
+	authMiddleware.ClientCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ClientAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+		if tokenReq == nil {
+			return nil, accesstoken.ErrorTextInvalidRequest
 		}
-		if ((password.ClientId == "admin") && (password.ClientSecret == "admin")) ||
-			((password.ClientId == "test") && (password.ClientSecret == "test")) {
-			return true
+		if ((tokenReq.UserID == "admin") && (tokenReq.Password == "admin")) ||
+			((tokenReq.UserID == "test") && (tokenReq.Password == "test")) {
+			return nil, ""
 		}
-		return false
+		return &endpoints.JWTAccessTokenResponse{}, ""
 	}
-
 	// 授权
-	authMiddleware.AuthorizatorFunc = func(c *gin.Context, claims jwt.MapClaims) bool {
+	authMiddleware.AuthorizateFunc = func(ctx context.Context, claims jwt.MapClaims) (err accesstoken.ErrorText) {
 		if claims == nil {
-			return false
+			return accesstoken.ErrorTextUnauthorizedClient
 		}
-		return true
-	}
+		return ""
 
-	authMiddleware.UnauthorizedFunc = func(c *gin.Context, statusCode int) {
-		c.JSON(statusCode, gin.H{
-			"code":    statusCode,
-			"message": http.StatusText(statusCode),
-		})
 	}
 	auth := r.Group("/login/oauth")
 	{
-		auth.POST("/access_token", authMiddleware.LoginHandler(context.Background()))
-		auth.POST("/refresh_token", authMiddleware.RefreshHandler(context.Background()))
+		auth.POST("/auth", authMiddleware.AuthorizateHandler(context.Background()))
+		auth.POST("/token", authMiddleware.AccessTokenHandler(context.Background()))
 	}
 
 	api := r.Group("/api/v1")
