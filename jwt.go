@@ -9,6 +9,7 @@ import (
 	"github.com/searKing/golib/net/http_/oauth2/grant/accesstoken"
 	"github.com/searKing/golib/net/http_/oauth2/grant/authorize"
 	"github.com/searKing/golib/net/http_/oauth2/grant/implict"
+	"sync"
 	"time"
 )
 
@@ -40,8 +41,8 @@ type GinJWTMiddleware struct {
 	// This is useful for testing or if your server uses a different time zone than your tokens.
 	TimeNowFunc func(ctx context.Context) time.Time
 
-	auth       *endpoints.JWTAuthorizationEndpoint
-	authBinded bool
+	auth *endpoints.JWTAuthorizationEndpoint
+	once sync.Once
 }
 
 const (
@@ -92,121 +93,118 @@ func (e *GinJWTMiddleware) lazyInit() {
 	if e.auth == nil {
 		return
 	}
-	if e.authBinded {
-		return
-	}
+	e.once.Do(func() {
+		if e.AuthorizationCodeGrantAuthorizationFunc != nil {
+			e.auth.AuthorizationCodeGrantAuthorizationFunc =
+				func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.AuthorizeAuthorizationResult, err authorize.ErrorText) {
+					c := ctx.Value(KeyGinContext)
+					if c == nil {
+						return nil, authorize.ErrorTextInvalidRequest
+					}
+					ginC, ok := c.(*gin.Context)
+					if !ok {
+						return nil, authorize.ErrorTextInvalidRequest
+					}
+					return e.AuthorizationCodeGrantAuthorizationFunc(ginC, authReq)
+				}
+		}
 
-	if e.AuthorizationCodeGrantAuthorizationFunc != nil {
-		e.auth.AuthorizationCodeGrantAuthorizationFunc =
-			func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.AuthorizeAuthorizationResult, err authorize.ErrorText) {
+		if e.ImplicitGrantAuthorizationFunc != nil {
+			e.auth.ImplicitGrantAuthorizationFunc = func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.JWTImplicitGrantAuthorizationResult, err implict.ErrorText) {
 				c := ctx.Value(KeyGinContext)
 				if c == nil {
-					return nil, authorize.ErrorTextInvalidRequest
+					return nil, implict.ErrorTextInvalidRequest
 				}
 				ginC, ok := c.(*gin.Context)
 				if !ok {
-					return nil, authorize.ErrorTextInvalidRequest
+					return nil, implict.ErrorTextInvalidRequest
 				}
-				return e.AuthorizationCodeGrantAuthorizationFunc(ginC, authReq)
+				return e.ImplicitGrantAuthorizationFunc(ginC, authReq)
 			}
-	}
-
-	if e.ImplicitGrantAuthorizationFunc != nil {
-		e.auth.ImplicitGrantAuthorizationFunc = func(ctx context.Context, authReq *endpoints.AuthorizationRequest) (res *endpoints.JWTImplicitGrantAuthorizationResult, err implict.ErrorText) {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return nil, implict.ErrorTextInvalidRequest
-			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return nil, implict.ErrorTextInvalidRequest
-			}
-			return e.ImplicitGrantAuthorizationFunc(ginC, authReq)
 		}
-	}
 
-	if e.AuthorizationCodeGrantAccessTokenFunc != nil {
-		e.auth.AuthorizationCodeGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.AuthorizeAccessTokenRequest) (tokenResp *endpoints.JWTAuthorizeAccessTokenResponse, err accesstoken.ErrorText) {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return nil, accesstoken.ErrorTextInvalidRequest
+		if e.AuthorizationCodeGrantAccessTokenFunc != nil {
+			e.auth.AuthorizationCodeGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.AuthorizeAccessTokenRequest) (tokenResp *endpoints.JWTAuthorizeAccessTokenResponse, err accesstoken.ErrorText) {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				return e.AuthorizationCodeGrantAccessTokenFunc(ginC, tokenReq)
 			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return nil, accesstoken.ErrorTextInvalidRequest
-			}
-			return e.AuthorizationCodeGrantAccessTokenFunc(ginC, tokenReq)
 		}
-	}
 
-	if e.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc != nil {
-		e.auth.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ResourceAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return nil, accesstoken.ErrorTextInvalidRequest
+		if e.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc != nil {
+			e.auth.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ResourceAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				return e.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc(ginC, tokenReq)
 			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return nil, accesstoken.ErrorTextInvalidRequest
-			}
-			return e.ResourceOwnerPasswordCredentialsGrantAccessTokenFunc(ginC, tokenReq)
 		}
-	}
 
-	if e.ClientCredentialsGrantAccessTokenFunc != nil {
-		e.auth.ClientCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ClientAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return nil, accesstoken.ErrorTextInvalidRequest
+		if e.ClientCredentialsGrantAccessTokenFunc != nil {
+			e.auth.ClientCredentialsGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.ClientAccessTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				return e.ClientCredentialsGrantAccessTokenFunc(ginC, tokenReq)
 			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return nil, accesstoken.ErrorTextInvalidRequest
-			}
-			return e.ClientCredentialsGrantAccessTokenFunc(ginC, tokenReq)
 		}
-	}
 
-	if e.RefreshTokenGrantAccessTokenFunc != nil {
-		e.auth.RefreshTokenGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.JWTRefreshTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return nil, accesstoken.ErrorTextInvalidRequest
+		if e.RefreshTokenGrantAccessTokenFunc != nil {
+			e.auth.RefreshTokenGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.JWTRefreshTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return nil, accesstoken.ErrorTextInvalidRequest
+				}
+				return e.RefreshTokenGrantAccessTokenFunc(ginC, tokenReq)
 			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return nil, accesstoken.ErrorTextInvalidRequest
-			}
-			return e.RefreshTokenGrantAccessTokenFunc(ginC, tokenReq)
 		}
-	}
 
-	if e.AuthorizateFunc != nil {
-		e.auth.AuthorizateFunc = func(ctx context.Context, claims jwt.MapClaims) (err accesstoken.ErrorText) {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return accesstoken.ErrorTextInvalidRequest
+		if e.AuthorizateFunc != nil {
+			e.auth.AuthorizateFunc = func(ctx context.Context, claims jwt.MapClaims) (err accesstoken.ErrorText) {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return accesstoken.ErrorTextInvalidRequest
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return accesstoken.ErrorTextInvalidRequest
+				}
+				return e.AuthorizateFunc(ginC, claims)
 			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return accesstoken.ErrorTextInvalidRequest
-			}
-			return e.AuthorizateFunc(ginC, claims)
 		}
-	}
 
-	if e.TimeNowFunc != nil {
-		e.auth.TimeNowFunc = func(ctx context.Context) time.Time {
-			c := ctx.Value(KeyGinContext)
-			if c == nil {
-				return time.Now()
+		if e.TimeNowFunc != nil {
+			e.auth.TimeNowFunc = func(ctx context.Context) time.Time {
+				c := ctx.Value(KeyGinContext)
+				if c == nil {
+					return time.Now()
+				}
+				ginC, ok := c.(*gin.Context)
+				if !ok {
+					return time.Now()
+				}
+				return e.TimeNowFunc(ginC)
 			}
-			ginC, ok := c.(*gin.Context)
-			if !ok {
-				return time.Now()
-			}
-			return e.TimeNowFunc(ginC)
 		}
-	}
-
+	})
 }

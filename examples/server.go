@@ -48,6 +48,17 @@ func main() {
 		return ""
 
 	}
+	authMiddleware.RefreshTokenGrantAccessTokenFunc = func(ctx context.Context, tokenReq *endpoints.JWTRefreshTokenRequest) (tokenResp *endpoints.JWTAccessTokenResponse, err accesstoken.ErrorText) {
+		if tokenReq == nil {
+			return nil, accesstoken.ErrorTextInvalidRequest
+		}
+		if ((tokenReq.UserID == "admin") && (tokenReq.Password == "admin")) ||
+			((tokenReq.UserID == "test") && (tokenReq.Password == "test")) {
+			return nil, ""
+		}
+		return &endpoints.JWTAccessTokenResponse{}, ""
+	}
+
 	auth := r.Group("/login/oauth")
 	{
 		auth.POST("/auth", authMiddleware.AuthorizateHandler(context.Background()))
