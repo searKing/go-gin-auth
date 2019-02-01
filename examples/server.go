@@ -61,7 +61,7 @@ func main() {
 
 	auth := r.Group("/login/oauth")
 	{
-		auth.POST("/auth", authMiddleware.AuthorizateHandler(context.Background()))
+		auth.POST("/auth", authMiddleware.AuthenticationHandler(context.Background()))
 		auth.POST("/token", authMiddleware.AccessTokenHandler(context.Background()))
 	}
 
